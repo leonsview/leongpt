@@ -1,101 +1,230 @@
-import Image from "next/image";
+'use client';
+
+import { useState, useEffect, useRef } from 'react';
+import { Menu, X, Send, PlusCircle, Trash2 } from 'lucide-react';
+import TextareaAutosize from 'react-textarea-autosize';
+import { streamMessage, ChatMessage } from '../actions/stream-message';
+import { readStreamableValue } from 'ai/rsc';
+
+interface Chat {
+  id: string;
+  name: string;
+  messages: ChatMessage[];
+}
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="https://nextjs.org/icons/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [message, setMessage] = useState('');
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const [editingChatId, setEditingChatId] = useState<string | null>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="https://nextjs.org/icons/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
+  useEffect(() => {
+    const savedChats = JSON.parse(localStorage.getItem('chats') || '[]');
+    if (savedChats.length === 0) {
+      const initialChat = createNewChat();
+      setChats([initialChat]);
+      setCurrentChatId(initialChat.id);
+    } else {
+      setChats(savedChats);
+      setCurrentChatId(savedChats[0].id);
+    }
+  }, []);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chats, currentChatId]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!message.trim() || !currentChatId) return;
+
+    const userMessage: ChatMessage = { id: Date.now(), role: 'user', content: message };
+    const updatedChats = chats.map(chat => 
+      chat.id === currentChatId 
+        ? { ...chat, messages: [...chat.messages, userMessage] }
+        : chat
+    );
+    setChats(updatedChats);
+    localStorage.setItem('chats', JSON.stringify(updatedChats));
+    setMessage('');
+
+    try {
+      const currentChat = updatedChats.find(chat => chat.id === currentChatId);
+      if (!currentChat) return;
+
+      const { output } = await streamMessage(currentChat.messages);
+      
+      const aiMessageId = Date.now();
+      const aiMessage: ChatMessage = { id: aiMessageId, role: 'assistant', content: '' };
+      
+      setChats(prev => prev.map(chat => 
+        chat.id === currentChatId 
+          ? { ...chat, messages: [...chat.messages, aiMessage] }
+          : chat
+      ));
+
+      let fullContent = '';
+      for await (const chunk of readStreamableValue(output)) {
+        fullContent += chunk;
+        setChats(prev => prev.map(chat => 
+          chat.id === currentChatId 
+            ? {
+                ...chat,
+                messages: chat.messages.map(msg => 
+                  msg.id === aiMessageId ? { ...msg, content: fullContent } : msg
+                )
+              }
+            : chat
+        ));
+      }
+      localStorage.setItem('chats', JSON.stringify(chats));
+    } catch (error) {
+      console.error('Error in streaming message:', error);
+    }
+  };
+
+  const createNewChat = () => {
+    const chatNumber = chats.length + 1;
+    return {
+      id: Date.now().toString(),
+      name: `Chat ${chatNumber}`,
+      messages: []
+    };
+  };
+
+  const handleNewChat = () => {
+    const newChat = createNewChat();
+    const updatedChats = [...chats, newChat];
+    setChats(updatedChats);
+    setCurrentChatId(newChat.id);
+    localStorage.setItem('chats', JSON.stringify(updatedChats));
+  };
+
+  const handleDeleteChat = (chatId: string) => {
+    const updatedChats = chats.filter(chat => chat.id !== chatId);
+    
+    if (updatedChats.length === 0) {
+      const newChat = createNewChat();
+      updatedChats.push(newChat);
+    }
+    
+    setChats(updatedChats);
+    localStorage.setItem('chats', JSON.stringify(updatedChats));
+    setCurrentChatId(updatedChats[0].id);
+  };
+
+  const handleRenameChat = (chatId: string, newName: string) => {
+    const updatedChats = chats.map(chat => 
+      chat.id === chatId ? { ...chat, name: newName } : chat
+    );
+    setChats(updatedChats);
+    localStorage.setItem('chats', JSON.stringify(updatedChats));
+    setEditingChatId(null);
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit(e as unknown as React.FormEvent);
+    }
+  };
+
+  return (
+    <div className="flex bg-black min-h-screen text-white relative">
+      <div className={`w-[300px] border-r border-gray-700 transition-all duration-300 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <h2 className="p-4 pt-16 text-xl font-semibold">Chats</h2>
+        <button
+          onClick={handleNewChat}
+          className="absolute top-4 right-4 p-2 rounded text-white transition-all duration-300 ease-in-out hover:scale-110 hover:animate-glow"
+        >
+          <PlusCircle size={24} />
+        </button>
+        <ul className="mt-4">
+          {chats.map(chat => (
+            <li
+              key={chat.id}
+              className={`p-2 pl-4 cursor-pointer flex justify-between items-center ${currentChatId === chat.id ? 'bg-gray-700' : ''}`}
+            >
+              {editingChatId === chat.id ? (
+                <input
+                  type="text"
+                  defaultValue={chat.name}
+                  onBlur={(e) => handleRenameChat(chat.id, e.target.value)}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      handleRenameChat(chat.id, e.currentTarget.value);
+                    }
+                  }}
+                  autoFocus
+                  className="bg-gray-800 text-white p-1 rounded w-full"
+                />
+              ) : (
+                <span 
+                  onDoubleClick={() => setEditingChatId(chat.id)}
+                  onClick={() => setCurrentChatId(chat.id)}
+                >
+                  {chat.name}
+                </span>
+              )}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDeleteChat(chat.id);
+                }}
+                className="p-1 hover:bg-gray-600 rounded"
+              >
+                <Trash2 size={16} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div className="flex-1 flex justify-center">
+        <div className="w-full max-w-[800px] p-4 pt-16 flex flex-col h-screen">
+          <h1 className="text-4xl font-bold mb-4 text-white">Chat with LeonGPT</h1>
+          <div className="flex-1 overflow-y-auto mb-4 bg-black rounded-lg p-4 border border-white">
+            <div className="space-y-2">
+              {chats.find(chat => chat.id === currentChatId)?.messages.map((msg) => (
+                <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[70%] p-3 rounded-2xl ${
+                    msg.role === 'user' 
+                      ? 'bg-blue-500 text-white rounded-br-none' 
+                      : 'bg-green-500 text-white rounded-bl-none'
+                  }`}>
+                    <p>{msg.content}</p>
+                  </div>
+                </div>
+              ))}
+              <div ref={chatEndRef} />
+            </div>
+          </div>
+          <form onSubmit={handleSubmit} className="relative">
+            <TextareaAutosize
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              onKeyDown={handleKeyPress}
+              placeholder="Type your message..."
+              minRows={2}
+              className="w-full bg-black text-white rounded-lg p-3 pr-12 resize-none border border-white"
             />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+            <button
+              type="submit"
+              className="absolute right-3 bottom-3 text-white"
+              disabled={!message.trim() || !currentChatId}
+            >
+              <Send size={20} />
+            </button>
+          </form>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+      </div>
+      <button
+        onClick={() => setSidebarOpen(!sidebarOpen)}
+        className="absolute top-4 left-4 p-2 rounded z-10 text-white transition-all duration-300 ease-in-out hover:scale-110 hover:animate-glow"
+      >
+        {sidebarOpen ? <X size={24} /> : <Menu size={24} />}
+      </button>
     </div>
   );
 }

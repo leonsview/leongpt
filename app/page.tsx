@@ -86,10 +86,9 @@ export default function Home() {
   };
 
   const createNewChat = () => {
-    const chatNumber = chats.length + 1;
     return {
       id: Date.now().toString(),
-      name: `Chat ${chatNumber}`,
+      name: "New Chat",
       messages: []
     };
   };
@@ -145,7 +144,8 @@ export default function Home() {
           {chats.map(chat => (
             <li
               key={chat.id}
-              className={`p-2 pl-4 cursor-pointer flex justify-between items-center ${currentChatId === chat.id ? 'bg-gray-700' : ''}`}
+              className={`p-2 pl-4 cursor-pointer flex justify-between items-center bg-black hover:bg-gray-900 ${currentChatId === chat.id ? 'bg-gray-900' : ''}`}
+              onClick={() => setCurrentChatId(chat.id)}
             >
               {editingChatId === chat.id ? (
                 <input
@@ -158,12 +158,15 @@ export default function Home() {
                     }
                   }}
                   autoFocus
-                  className="bg-gray-800 text-white p-1 rounded w-full"
+                  className="bg-gray-900 text-white p-1 rounded w-full"
+                  onClick={(e) => e.stopPropagation()} // Prevent click from bubbling up when editing
                 />
               ) : (
                 <span 
-                  onDoubleClick={() => setEditingChatId(chat.id)}
-                  onClick={() => setCurrentChatId(chat.id)}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setEditingChatId(chat.id);
+                  }}
                 >
                   {chat.name}
                 </span>
@@ -173,9 +176,9 @@ export default function Home() {
                   e.stopPropagation();
                   handleDeleteChat(chat.id);
                 }}
-                className="p-1 hover:bg-gray-600 rounded"
+                className="p-1 rounded group"
               >
-                <Trash2 size={16} />
+                <Trash2 size={16} className="group-hover:text-red-500 transition-colors duration-200" />
               </button>
             </li>
           ))}
